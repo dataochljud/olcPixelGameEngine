@@ -2,6 +2,7 @@
 	olcPixelGameEngine.h
 
 	+-------------------------------------------------------------+
+	|           OneLoneCoder Pixel Game Engine v2.05              |
 	|  "What do you need? Pixels... Lots of Pixels..." - javidx9  |
 	+-------------------------------------------------------------+
 
@@ -110,6 +111,7 @@
 	JackOJC, KrossX, Huhlig, Dragoneye, Appa, JustinRichardsMusic, SliceNDice
 	Ralakus, Gorbit99, raoul, joshinils, benedani, Moros1138, SaladinAkara & MagetzUb 
 	for advice, ideas and testing, and I'd like to extend my appreciation to the 
+	144K YouTube followers,	70+ Patreons and 6K Discord server members who give me 
 	the motivation to keep going with all this :D
 
 	Significant Contributors: @MaGetzUb, @slavka, @Dragoneye & @Gorbit99
@@ -218,6 +220,7 @@ int main()
 	#endif
 #endif
 
+#if defined(__linux__) || defined(__MINGW32__) || defined(__EMSCRIPTEN__) || defined(__FreeBSD__)
 	#if __cplusplus >= 201703L
 		#undef USE_EXPERIMENTAL_FS
 	#endif
@@ -655,6 +658,7 @@ namespace olc
 
 		void DrawRotatedDecal(const olc::vf2d& pos, olc::Decal* decal, const float fAngle, const olc::vf2d& center = { 0.0f, 0.0f }, const olc::vf2d& scale = { 1.0f,1.0f }, const olc::Pixel& tint = olc::WHITE);
 
+		void DrawStringDecal(const olc::vf2d& pos, const std::string& sText, const Pixel col = olc::WHITE, const olc::vf2d& scale = { 1.0f, 1.0f });
 		void DrawPartialRotatedDecal(const olc::vf2d& pos, olc::Decal* decal, const float fAngle, const olc::vf2d& center, const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::vf2d& scale = { 1.0f, 1.0f }, const olc::Pixel& tint = olc::WHITE);
 
 		void DrawPartialWarpedDecal(olc::Decal* decal, const olc::vf2d(&pos)[4], const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::Pixel& tint = olc::WHITE);
@@ -801,7 +805,6 @@ namespace olc
 	{ r = 0; g = 0; b = 0; a = nDefaultAlpha; }
 
 	Pixel::Pixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha)
-	{ r = red; g = green; b = blue; a = alpha; }
 	{ n = red | (green << 8) | (blue << 16) | (alpha << 24); } // Thanks jarekpelczar 
 
 
@@ -1202,8 +1205,7 @@ namespace olc
 		if (vPixelSize.x <= 0 || vPixelSize.y <= 0 || vScreenSize.x <= 0 || vScreenSize.y <= 0)
 			return olc::FAIL;
 
-		// Construct default font sheet
-		olc_ConstructFontSheet();
+		
 		return olc::OK;
 	}
 
@@ -1945,6 +1947,7 @@ namespace olc
 	}
 
 	void PixelGameEngine::DrawWarpedDecal(olc::Decal* decal, const std::array<olc::vf2d, 4>& pos, const olc::Pixel& tint)
+	{ DrawWarpedDecal(decal, pos.data(), tint);	}
 
 	void PixelGameEngine::DrawWarpedDecal(olc::Decal* decal, const olc::vf2d(&pos)[4], const olc::Pixel& tint)
 	{ DrawWarpedDecal(decal, &pos[0], tint); }
@@ -1957,6 +1960,21 @@ namespace olc
 	   
 	void PixelGameEngine::DrawStringDecal(const olc::vf2d& pos, const std::string& sText, const Pixel col, const olc::vf2d& scale)
 	{
+		olc::vf2d spos = { 0.0f, 0.0f };
+		for (auto c : sText)
+		{
+			if (c == '\n')
+			{
+				spos.x = 0; spos.y += 8.0f * scale.y;
+			}
+			else
+			{
+				int32_t ox = (c - 32) % 16;
+				int32_t oy = (c - 32) / 16;
+				DrawPartialDecal(pos + spos, fontDecal, { float(ox) * 8.0f, float(oy) * 8.0f }, { 8.0f, 8.0f }, scale, col);
+				spos.x += 8.0f * scale.x;
+			}
+		}
 	}
 
 	void PixelGameEngine::DrawString(const olc::vi2d& pos, const std::string& sText, Pixel col, uint32_t scale)
@@ -2429,6 +2447,7 @@ namespace olc
 			glXMakeCurrent(olc_Display, None, NULL);
 			glXDestroyContext(olc_Display, glDeviceContext);
 		#endif
+			return olc::rcode::OK;
 		}
 
 		void DisplayFrame() override
@@ -2437,6 +2456,7 @@ namespace olc
 			SwapBuffers(glDeviceContext);
 		#endif	
 
+		#if defined(__linux__) || defined(__FreeBSD__)
 			X11::glXSwapBuffers(olc_Display, *olc_Window);
 		#endif		
 		}
@@ -2656,6 +2676,7 @@ namespace olc
 			int height = rWndRect.bottom - rWndRect.top;
 
 			olc_hWnd = CreateWindowEx(dwExStyle, olcT("OLC_PIXEL_GAME_ENGINE"), olcT(""), dwStyle,
+				vTopLeft.x, vTopLeft.y, width, height, NULL, NULL, GetModuleHandle(nullptr), this);
 
 			// Create Keyboard Mapping
 			mapKeys[0x00] = Key::NONE;
@@ -2789,6 +2810,7 @@ namespace olc
 // O------------------------------------------------------------------------------O
 // | START PLATFORM: LINUX                                                        |
 // O------------------------------------------------------------------------------O
+#if defined(__linux__) || defined(__FreeBSD__)
 namespace olc
 {
 	class Platform_Linux : public olc::Platform
@@ -3414,6 +3436,7 @@ namespace olc
 		platform = std::make_unique<olc::Platform_Windows>();
 #endif
 
+#if defined(__linux__) || defined(__FreeBSD__)
 		platform = std::make_unique<olc::Platform_Linux>();
 #endif
 
