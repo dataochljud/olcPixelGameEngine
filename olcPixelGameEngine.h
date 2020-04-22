@@ -57,6 +57,7 @@
 
 	Links
 	~~~~~
+
 	YouTube:	https://www.youtube.com/javidx9
 				https://www.youtube.com/javidx9extra
 	Discord:	https://discord.gg/WhwHUMV
@@ -194,7 +195,11 @@ int main()
 #include <cmath>
 #include <cstdint>
 #include <string>
+#if defined(__ATARI_ST__)
+#include <cstdio>
+#else
 #include <iostream>
+#endif
 #include <streambuf>
 #include <sstream>
 #include <chrono>
@@ -202,7 +207,7 @@ int main()
 #include <list>
 #include <thread>
 #include <atomic>
-#include <fstream>
+//#include <fstream>
 #include <map>
 #include <functional>
 #include <algorithm>
@@ -228,12 +233,16 @@ int main()
 
 #if defined(__APPLE__)
     #undef USE_EXPERIMENTAL_FS
-#endif
+#elif defined(__ATARI_ST__)
+#undef USE_EXPERIMENTAL_FS
+#include <filesystem>
 #if defined(USE_EXPERIMENTAL_FS)
 	// C++14
 	#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
 	#include <experimental/filesystem>
 	namespace _gfs = std::experimental::filesystem::v1;
+#elif defined(__ATARI_ST__)
+
 #else
 	// C++17
 	#include <ghc/filesystem.hpp>
@@ -410,7 +419,7 @@ namespace olc
 	private:
 		struct sResourceFile { uint32_t nSize; uint32_t nOffset; };
 		std::map<std::string, sResourceFile> mapFiles;
-		std::ifstream baseFile;
+		//std::ifstream baseFile;
 		std::vector<char> scramble(const std::vector<char>& data, const std::string& key);
 		std::string makeposix(const std::string& path);
 	};
@@ -859,14 +868,14 @@ namespace olc
 		// which load very fast, but are completely uncompressed
 		if (pack == nullptr)
 		{
-			std::ifstream ifs;
-			ifs.open(sImageFile, std::ifstream::binary);
-			if (ifs.is_open())
+		  //			std::ifstream ifs;
+		  //	ifs.open(sImageFile, std::ifstream::binary);
+		  /*	if (ifs.is_open())
 			{
 				ReadData(ifs);
 				return olc::OK;
 			}
-			else
+			else*/
 				return olc::FAIL;
 		}
 		else
@@ -883,16 +892,16 @@ namespace olc
 	{
 		if (pColData == nullptr) return olc::FAIL;
 
-		std::ofstream ofs;
-		ofs.open(sImageFile, std::ifstream::binary);
-		if (ofs.is_open())
+		//	std::ofstream ofs;
+		//	ofs.open(sImageFile, std::ifstream::binary);
+		/*	if (ofs.is_open())
 		{
 			ofs.write((char*)&width, sizeof(int32_t));
 			ofs.write((char*)&height, sizeof(int32_t));
 			ofs.write((char*)pColData, (size_t)width * (size_t)height * sizeof(uint32_t));
 			ofs.close();
 			return olc::OK;
-		}
+			}*/
 
 		return olc::FAIL;
 	}
@@ -1007,21 +1016,21 @@ namespace olc
 	ResourceBuffer::ResourceBuffer(std::ifstream& ifs, uint32_t offset, uint32_t size)
 	{
 		vMemory.resize(size);
-		ifs.seekg(offset); ifs.read(vMemory.data(), vMemory.size());
-		setg(vMemory.data(), vMemory.data(), vMemory.data() + size);
+		//	ifs.seekg(offset); ifs.read(vMemory.data(), vMemory.size());
+		//	setg(vMemory.data(), vMemory.data(), vMemory.data() + size);
 	}
 
 	ResourcePack::ResourcePack() { }
-	ResourcePack::~ResourcePack() { baseFile.close(); }
+	ResourcePack::~ResourcePack() { /*baseFile.close();*/ }
 
 	bool ResourcePack::AddFile(const std::string& sFile)
 	{
 		const std::string file = makeposix(sFile);
 
-		if (_gfs::exists(file))
+		if (false)//_gfs::exists(file))
 		{
 			sResourceFile e;
-			e.nSize = (uint32_t)_gfs::file_size(file);
+			//e.nSize = (uint32_t)_gfs::file_size(file);
 			e.nOffset = 0; // Unknown at this stage			
 			mapFiles[file] = e;
 			return true;
@@ -1032,16 +1041,16 @@ namespace olc
 	bool ResourcePack::LoadPack(const std::string& sFile, const std::string& sKey)
 	{
 		// Open the resource file
-		baseFile.open(sFile, std::ifstream::binary);
-		if (!baseFile.is_open()) return false;
+	  //	baseFile.open(sFile, std::ifstream::binary);
+		if (true/*!baseFile.is_open()*/) return false;
 
 		// 1) Read Scrambled index
 		uint32_t nIndexSize = 0;
-		baseFile.read((char*)&nIndexSize, sizeof(uint32_t));
+		//	baseFile.read((char*)&nIndexSize, sizeof(uint32_t));
 
 		std::vector<char> buffer(nIndexSize);
 		for (uint32_t j = 0; j < nIndexSize; j++)
-			buffer[j] = baseFile.get();
+		  ;//	buffer[j] = baseFile.get();
 
 		std::vector<char> decoded = scramble(buffer, sKey);
 		size_t pos = 0;
@@ -1082,43 +1091,43 @@ namespace olc
 	bool ResourcePack::SavePack(const std::string& sFile, const std::string& sKey)
 	{
 		// Create/Overwrite the resource file
-		std::ofstream ofs(sFile, std::ofstream::binary);
-		if (!ofs.is_open()) return false;
+		//std::ofstream ofs(sFile, std::ofstream::binary);
+	  if (true/*!ofs.is_open()*/) return false;
 
 		// Iterate through map
 		uint32_t nIndexSize = 0; // Unknown for now
-		ofs.write((char*)&nIndexSize, sizeof(uint32_t));
-		uint32_t nMapSize = uint32_t(mapFiles.size());
-		ofs.write((char*)&nMapSize, sizeof(uint32_t));
+		//		ofs.write((char*)&nIndexSize, sizeof(uint32_t));
+		//		uint32_t nMapSize = uint32_t(mapFiles.size());
+		//		ofs.write((char*)&nMapSize, sizeof(uint32_t));
 		for (auto& e : mapFiles)
 		{
 			// Write the path of the file
 			size_t nPathSize = e.first.size();
-			ofs.write((char*)&nPathSize, sizeof(uint32_t));
-			ofs.write(e.first.c_str(), nPathSize);
+			//			ofs.write((char*)&nPathSize, sizeof(uint32_t));
+			//ofs.write(e.first.c_str(), nPathSize);
 
 			// Write the file entry properties
-			ofs.write((char*)&e.second.nSize, sizeof(uint32_t));
-			ofs.write((char*)&e.second.nOffset, sizeof(uint32_t));
+			//ofs.write((char*)&e.second.nSize, sizeof(uint32_t));
+			//ofs.write((char*)&e.second.nOffset, sizeof(uint32_t));
 		}
 
 		// 2) Write the individual Data
-		std::streampos offset = ofs.tellp();
-		nIndexSize = (uint32_t)offset;
+		//	std::streampos offset = ofs.tellp();
+		//	nIndexSize = (uint32_t)offset;
 		for (auto& e : mapFiles)
 		{
 			// Store beginning of file offset within resource pack file
-			e.second.nOffset = (uint32_t)offset;
+		  //		e.second.nOffset = (uint32_t)offset;
 
 			// Load the file to be added
-			std::vector<uint8_t> vBuffer(e.second.nSize);
-			std::ifstream i(e.first, std::ifstream::binary);
-			i.read((char*)vBuffer.data(), e.second.nSize);
-			i.close();
+			//	std::vector<uint8_t> vBuffer(e.second.nSize);
+			//	std::ifstream i(e.first, std::ifstream::binary);
+			//	i.read((char*)vBuffer.data(), e.second.nSize);
+			//	i.close();
 
 			// Write the loaded file into resource pack file
-			ofs.write((char*)vBuffer.data(), e.second.nSize);
-			offset += e.second.nSize;
+			//	ofs.write((char*)vBuffer.data(), e.second.nSize);
+			//	offset += e.second.nSize;
 		}
 
 		// 3) Scramble Index
@@ -1130,8 +1139,8 @@ namespace olc
 		};
 
 		// Iterate through map
-		write((char*)&nMapSize, sizeof(uint32_t));
-		for (auto& e : mapFiles)
+		//write((char*)&nMapSize, sizeof(uint32_t));
+		/*	for (auto& e : mapFiles)
 		{
 			// Write the path of the file
 			size_t nPathSize = e.first.size();
@@ -1149,15 +1158,15 @@ namespace olc
 		ofs.seekp(0, std::ios::beg);
 		ofs.write((char*)&nIndexStringLen, sizeof(uint32_t));
 		ofs.write(sIndexString.data(), nIndexStringLen);
-		ofs.close();
+		ofs.close();*/
 		return true;
 	}
 
 	ResourceBuffer ResourcePack::GetFileBuffer(const std::string& sFile)
-	{ return ResourceBuffer(baseFile, mapFiles[sFile].nOffset, mapFiles[sFile].nSize); }
+	{ /*return (ResourceBuffer)nullptr;/*ResourceBuffer(baseFile, mapFiles[sFile].nOffset, mapFiles[sFile].nSize);*/ }
 
 	bool ResourcePack::Loaded()
-	{ return baseFile.is_open(); }
+	{ return false;/*baseFile.is_open();*/ }
 
 	std::vector<char> ResourcePack::scramble(const std::vector<char>& data, const std::string& key)
 	{
@@ -1238,6 +1247,9 @@ namespace olc
 
 		// Start the thread
 		bAtomActive = true;
+#if defined(__ATARI_ST__)
+		PixelGameEngine::EngineTread();
+#else
 		std::thread t = std::thread(&PixelGameEngine::EngineThread, this);
 
 		// Some implementations may form an event loop here
@@ -1245,7 +1257,7 @@ namespace olc
 
 		// Wait for thread to be exited
 		t.join();
-
+#endif
 		if (platform->ApplicationCleanUp() != olc::OK) return olc::FAIL;
 
 		return olc::OK;
