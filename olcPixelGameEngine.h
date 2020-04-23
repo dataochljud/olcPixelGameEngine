@@ -1,8 +1,6 @@
 /*
-	olcPixelGameEngine.h
-
 	+-------------------------------------------------------------+
-	|           OneLoneCoder Pixel Game Engine v2.05              |
+	|           OneLoneCoder Pixel Game Engine v2.01              |
 	|  "What do you need? Pixels... Lots of Pixels..." - javidx9  |
 	+-------------------------------------------------------------+
 
@@ -57,7 +55,6 @@
 
 	Links
 	~~~~~
-
 	YouTube:	https://www.youtube.com/javidx9
 				https://www.youtube.com/javidx9extra
 	Discord:	https://discord.gg/WhwHUMV
@@ -112,7 +109,7 @@
 	JackOJC, KrossX, Huhlig, Dragoneye, Appa, JustinRichardsMusic, SliceNDice
 	Ralakus, Gorbit99, raoul, joshinils, benedani, Moros1138, SaladinAkara & MagetzUb 
 	for advice, ideas and testing, and I'd like to extend my appreciation to the 
-	144K YouTube followers,	70+ Patreons and 6K Discord server members who give me 
+	135K YouTube followers,	60+ Patreons and 6K Discord server members who give me 
 	the motivation to keep going with all this :D
 
 	Significant Contributors: @MaGetzUb, @slavka, @Dragoneye & @Gorbit99
@@ -132,10 +129,6 @@
 	David Barr, aka javidx9, �OneLoneCoder 2018, 2019, 2020
 
 	2.01: Made renderer and platform static for multifile projects
-	2.02: Added Decal destructor, optimised Pixel constructor
-	2.03: Added FreeBSD flags, Added DrawStringDecal()
-	2.04: Windows Full-Screen bug fixed
-	2.05: Added DrawPartialWarpedDecal(), Added DrawPartialRotatedDecal()
 */
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -195,11 +188,7 @@ int main()
 #include <cmath>
 #include <cstdint>
 #include <string>
-#if defined(__ATARI_ST__)
-#include <cstdio>
-#else
 #include <iostream>
-#endif
 #include <streambuf>
 #include <sstream>
 #include <chrono>
@@ -207,13 +196,14 @@ int main()
 #include <list>
 #include <thread>
 #include <atomic>
-//#include <fstream>
+#include <condition_variable>
+#include <fstream>
 #include <map>
 #include <functional>
 #include <algorithm>
 #include <array>
 #include <cstring>
-
+//#include <sys/statvfs.h>
 // O------------------------------------------------------------------------------O
 // | COMPILER CONFIGURATION ODDITIES                                              |
 // O------------------------------------------------------------------------------O
@@ -225,30 +215,35 @@ int main()
 	#endif
 #endif
 
-#if defined(__linux__) || defined(__MINGW32__) || defined(__EMSCRIPTEN__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__MINGW32__) || defined(__EMSCRIPTEN__)
 	#if __cplusplus >= 201703L
 		#undef USE_EXPERIMENTAL_FS
 	#endif
 #endif
-
+#if defined(__ATARI_ST__)
+#undef USE_EXPERIMENTAL_FS
+//#define OLC_IGNORE_VEC2
+//#include <ghc/filesystem.hpp>*/
+//#include <filesystem>
+//namespace _gfs = std::filesystem;
+#define OLC_GFX_ATARI_ST 1
+#include <png.h>
+#else
 #if defined(__APPLE__)
     #undef USE_EXPERIMENTAL_FS
-#elif defined(__ATARI_ST__)
-#undef USE_EXPERIMENTAL_FS
-#include <filesystem>
+#endif
 #if defined(USE_EXPERIMENTAL_FS)
 	// C++14
 	#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
-	#include <experimental/filesystem>
-	namespace _gfs = std::experimental::filesystem::v1;
-#elif defined(__ATARI_ST__)
+	#include <filesystem>
+	namespace _gfs = std::filesystem;
 
 #else
 	// C++17
-	#include <ghc/filesystem.hpp>
-	namespace _gfs = ghc::filesystem;
+	#include <filesystem>
+	namespace _gfs = std::filesystem;
 #endif
-
+#endif
 #if defined(UNICODE) || defined(_UNICODE)
 	#define olcT(s) L##s
 #else
@@ -285,7 +280,7 @@ namespace olc
 		union
 		{
 			uint32_t n = nDefaultPixel;
-			struct { uint8_t r; uint8_t g; uint8_t b; uint8_t a; };
+			struct { uint8_t r; uint8_t g; uint8_t b; uint8_t a; } ;
 		};
 
 		enum Mode { NORMAL, MASK, ALPHA, CUSTOM };
@@ -419,7 +414,7 @@ namespace olc
 	private:
 		struct sResourceFile { uint32_t nSize; uint32_t nOffset; };
 		std::map<std::string, sResourceFile> mapFiles;
-		//std::ifstream baseFile;
+		std::ifstream baseFile;
 		std::vector<char> scramble(const std::vector<char>& data, const std::string& key);
 		std::string makeposix(const std::string& path);
 	};
@@ -460,7 +455,116 @@ namespace olc
 		Pixel *pColData = nullptr;
 		Mode modeSample = Mode::NORMAL;
 	};
+	class SpriteST : public olc::Sprite
+	{
+	private:
+	  uint16_t* pSpriteData; // bitplanes
+	  short* pLBuffer;
+	  uint8_t colorlookup[255];
+	    struct palette {
+	      uint8_t line; // line of palette
+	      uint16_t pcolor[16];
+	      palette *next=nullptr;
+	    };
+	    palette *pPalettes;
+	  
+	  struct c2p {
+	    uint8_t p1byte1,p1byte0,p2byte1,p2byte0,p3byte1,p3byte0,p4byte1,p4byte0;
+	  };
+	  struct c2p_lookup {
+	    uint8_t l1[255],l2[255],l3[255],l4[255];
+	  };
+	  c2p_lookup c2pl;
+	  c2p c2p_data;
+	public:
+	  SpriteST(uint32_t x, uint32_t y)  {
+	    //color lookup init
+	    pColData = new Pixel[x*y];
+	    for (int i=0;i<256;i++)
+	      colorlookup[i] = (i >> 5);
+	  }
+	  SpriteST(Sprite *s)
+	    {
+              uint16_t pixel_color;
+	      width = s->width;
+	      height = s->height;
+	      pColData = new Pixel[width * height];
+              pSpriteData = new uint16_t[(width / 16 * 4) * height];
+              // copy data and convert to bitplanes
+              uint8_t num_of_colors=0;
+              uint8_t used_colors=2;
+              pPalettes = new palette;
+              uint8_t pixel_color_nr=0;
 
+              uint8_t pixel_word[8];
+
+              for (int i=0; i<height;i++)
+		{
+		  for (int j=0; j<width; j+=16)
+		    {
+		      for (int p=0;p<16;p++) 
+			{
+			  
+			  int r = s->GetPixel(i,j).r;
+			  int g = s->GetPixel(i,j).g;
+			  int b = s->GetPixel(i,j).b;
+			  pixel_color = ((r >> 5) << 8) | ((g >> 5) << 4) | (b >> 5);
+			  // check color
+			  if (used_colors == 2 ) {
+			    pPalettes->pcolor[1] = pixel_color;
+			    used_colors++;
+			    pixel_color_nr=1;
+			  }  else 
+			    {
+			      bool loop = true;
+			      bool found_color=false;
+			   
+				  for (int c=1; c<used_colors;c++)
+				    {
+				      if (pPalettes->pcolor[c] == pixel_color)
+					{
+					  pPalettes->pcolor[c] = pixel_color;
+					  found_color = true;
+					  loop = false;
+					  pixel_color_nr=c;
+					  break;
+					}
+				    }
+				  if (!found_color)
+				    {
+				      pPalettes->pcolor[used_colors-1] = pixel_color;
+				      pixel_color_nr=used_colors-1;
+				      used_colors++;
+				      if(used_colors==16)
+					if(_DEBUG_)
+					  std::cout << "All colors used in sprite!" << std::endl;
+				    }
+			    } /* else */
+			  if (p % 2) {pixel_word[p] = pixel_word[p] | (pixel_color_nr << 4);  }
+			  else { pixel_word[p] = pixel_word[p] | (pixel_color_nr); }
+			} // for p
+		      uint16_t bplane[4];
+		      uint8_t *fb,*tb;
+		      for (int b=0; b<16;b++)
+			{
+			  bplane[0] = (pixel_word[b] & 0x01) | (pixel_word[b] & 0x10);
+			  bplane[1] = (pixel_word[b] & 0x02) | (pixel_word[b] & 0x20);
+			  bplane[2] = (pixel_word[b] & 0x04) | (pixel_word[b] & 0x40);
+			  bplane[3] = (pixel_word[b] & 0x08) | (pixel_word[b] & 0x80);
+			}
+		      
+		    } //for x (word)
+		} // for y (lines)
+           }
+	  ~SpriteST()
+	    {
+	       if (pColData)
+	      	 delete[] pColData;
+               if (pSpriteData)
+                 delete[] pSpriteData;
+	    }
+	      
+	};
 	// O------------------------------------------------------------------------------O
 	// | olc::Decal - A GPU resident storage of an olc::Sprite                        |
 	// O------------------------------------------------------------------------------O
@@ -468,7 +572,6 @@ namespace olc
 	{
 	public:
 		Decal(olc::Sprite* spr);
-		virtual ~Decal();
 		void Update();
 
 	public: // But dont touch
@@ -515,7 +618,6 @@ namespace olc
 		virtual void       DrawDecalQuad(const olc::DecalInstance& decal) = 0;
 		virtual uint32_t   CreateTexture(const uint32_t width, const uint32_t height) = 0;
 		virtual void       UpdateTexture(uint32_t id, olc::Sprite* spr) = 0;
-		virtual uint32_t   DeleteTexture(const uint32_t id) = 0;
 		virtual void       ApplyTexture(uint32_t id) = 0;
 		virtual void       UpdateViewport(const olc::vi2d& pos, const olc::vi2d& size) = 0;
 		virtual void       ClearBuffer(olc::Pixel p, bool bDepth) = 0;
@@ -667,14 +769,7 @@ namespace olc
 
 		void DrawRotatedDecal(const olc::vf2d& pos, olc::Decal* decal, const float fAngle, const olc::vf2d& center = { 0.0f, 0.0f }, const olc::vf2d& scale = { 1.0f,1.0f }, const olc::Pixel& tint = olc::WHITE);
 
-		void DrawStringDecal(const olc::vf2d& pos, const std::string& sText, const Pixel col = olc::WHITE, const olc::vf2d& scale = { 1.0f, 1.0f });
-		void DrawPartialRotatedDecal(const olc::vf2d& pos, olc::Decal* decal, const float fAngle, const olc::vf2d& center, const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::vf2d& scale = { 1.0f, 1.0f }, const olc::Pixel& tint = olc::WHITE);
-
-		void DrawPartialWarpedDecal(olc::Decal* decal, const olc::vf2d(&pos)[4], const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::Pixel& tint = olc::WHITE);
-		void DrawPartialWarpedDecal(olc::Decal* decal, const olc::vf2d* pos, const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::Pixel& tint = olc::WHITE);
-		void DrawPartialWarpedDecal(olc::Decal* decal, const std::array<olc::vf2d, 4>& pos, const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::Pixel& tint = olc::WHITE);
-
-
+		
 		// Draws a single line of text
 		void DrawString(int32_t x, int32_t y, const std::string& sText, Pixel col = olc::WHITE, uint32_t scale = 1);
 		void DrawString(const olc::vi2d& pos, const std::string& sText, Pixel col = olc::WHITE, uint32_t scale = 1);
@@ -709,7 +804,6 @@ namespace olc
 		float		fFrameTimer           = 1.0f;
 		int			nFrameCount           = 0;
 		Sprite*     fontSprite            = nullptr;
-		Decal*		fontDecal			  = nullptr;
 		Sprite*     pDefaultDrawTarget    = nullptr;
 		std::vector<LayerDesc> vLayers;
 		uint8_t		nTargetLayer          = 0;
@@ -814,8 +908,7 @@ namespace olc
 	{ r = 0; g = 0; b = 0; a = nDefaultAlpha; }
 
 	Pixel::Pixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha)
-	{ n = red | (green << 8) | (blue << 16) | (alpha << 24); } // Thanks jarekpelczar 
-
+	{ r = red; g = green; b = blue; a = alpha; }
 
 	Pixel::Pixel(uint32_t p)
 	{ n = p; }
@@ -855,7 +948,7 @@ namespace olc
 
 	olc::rcode Sprite::LoadFromPGESprFile(const std::string& sImageFile, olc::ResourcePack *pack)
 	{
-		if (pColData) delete[] pColData;
+	  	if (pColData) delete[] pColData;
 		auto ReadData = [&](std::istream &is)
 		{
 			is.read((char*)&width, sizeof(int32_t));
@@ -866,43 +959,44 @@ namespace olc
 
 		// These are essentially Memory Surfaces represented by olc::Sprite
 		// which load very fast, but are completely uncompressed
-		if (pack == nullptr)
+		if (false)
 		{
-		  //			std::ifstream ifs;
-		  //	ifs.open(sImageFile, std::ifstream::binary);
-		  /*	if (ifs.is_open())
+			std::ifstream ifs;
+			ifs.open(sImageFile, std::ifstream::binary);
+			if (ifs.is_open())
 			{
 				ReadData(ifs);
 				return olc::OK;
 			}
-			else*/
+			else
 				return olc::FAIL;
 		}
 		else
 		{
-			ResourceBuffer rb = pack->GetFileBuffer(sImageFile);
+		  	ResourceBuffer rb = pack->GetFileBuffer(sImageFile);
 			std::istream is(&rb);
 			ReadData(is);
 			return olc::OK;
 		}
 		return olc::FAIL;
+	  return olc::FAIL;
 	}
 
 	olc::rcode Sprite::SaveToPGESprFile(const std::string& sImageFile)
 	{
 		if (pColData == nullptr) return olc::FAIL;
 
-		//	std::ofstream ofs;
-		//	ofs.open(sImageFile, std::ifstream::binary);
-		/*	if (ofs.is_open())
+		std::ofstream ofs;
+		ofs.open(sImageFile, std::ifstream::binary);
+		if (ofs.is_open())
 		{
 			ofs.write((char*)&width, sizeof(int32_t));
 			ofs.write((char*)&height, sizeof(int32_t));
 			ofs.write((char*)pColData, (size_t)width * (size_t)height * sizeof(uint32_t));
 			ofs.close();
 			return olc::OK;
-			}*/
-
+		}
+	
 		return olc::FAIL;
 	}
 
@@ -927,7 +1021,7 @@ namespace olc
 		else
 		{
 			return pColData[abs(y%height)*width + abs(x%width)];
-		}
+			}
 	}
 
 	bool Sprite::SetPixel(int32_t x, int32_t y, Pixel p)
@@ -994,15 +1088,6 @@ namespace olc
 		renderer->UpdateTexture(id, sprite);
 	}
 
-	Decal::~Decal()
-	{
-		if (id != -1)
-		{
-			renderer->DeleteTexture(id);
-			id = -1;
-		}
-	}
-
 
 
 	// O------------------------------------------------------------------------------O
@@ -1016,41 +1101,41 @@ namespace olc
 	ResourceBuffer::ResourceBuffer(std::ifstream& ifs, uint32_t offset, uint32_t size)
 	{
 		vMemory.resize(size);
-		//	ifs.seekg(offset); ifs.read(vMemory.data(), vMemory.size());
-		//	setg(vMemory.data(), vMemory.data(), vMemory.data() + size);
+		ifs.seekg(offset); ifs.read(vMemory.data(), vMemory.size());
+		setg(vMemory.data(), vMemory.data(), vMemory.data() + size);
 	}
 
 	ResourcePack::ResourcePack() { }
-	ResourcePack::~ResourcePack() { /*baseFile.close();*/ }
+	ResourcePack::~ResourcePack() { baseFile.close(); }
 
 	bool ResourcePack::AddFile(const std::string& sFile)
 	{
 		const std::string file = makeposix(sFile);
 
-		if (false)//_gfs::exists(file))
+	/*	if (_gfs::exists(file))
 		{
 			sResourceFile e;
-			//e.nSize = (uint32_t)_gfs::file_size(file);
+			e.nSize = (uint32_t)_gfs::file_size(file);
 			e.nOffset = 0; // Unknown at this stage			
 			mapFiles[file] = e;
 			return true;
-		}
+			}*/
 		return false;
 	}
 
 	bool ResourcePack::LoadPack(const std::string& sFile, const std::string& sKey)
 	{
 		// Open the resource file
-	  //	baseFile.open(sFile, std::ifstream::binary);
-		if (true/*!baseFile.is_open()*/) return false;
+		baseFile.open(sFile, std::ifstream::binary);
+		if (!baseFile.is_open()) return false;
 
 		// 1) Read Scrambled index
 		uint32_t nIndexSize = 0;
-		//	baseFile.read((char*)&nIndexSize, sizeof(uint32_t));
+		baseFile.read((char*)&nIndexSize, sizeof(uint32_t));
 
 		std::vector<char> buffer(nIndexSize);
 		for (uint32_t j = 0; j < nIndexSize; j++)
-		  ;//	buffer[j] = baseFile.get();
+			buffer[j] = baseFile.get();
 
 		std::vector<char> decoded = scramble(buffer, sKey);
 		size_t pos = 0;
@@ -1091,43 +1176,43 @@ namespace olc
 	bool ResourcePack::SavePack(const std::string& sFile, const std::string& sKey)
 	{
 		// Create/Overwrite the resource file
-		//std::ofstream ofs(sFile, std::ofstream::binary);
-	  if (true/*!ofs.is_open()*/) return false;
+		std::ofstream ofs(sFile, std::ofstream::binary);
+		if (!ofs.is_open()) return false;
 
 		// Iterate through map
 		uint32_t nIndexSize = 0; // Unknown for now
-		//		ofs.write((char*)&nIndexSize, sizeof(uint32_t));
-		//		uint32_t nMapSize = uint32_t(mapFiles.size());
-		//		ofs.write((char*)&nMapSize, sizeof(uint32_t));
+		ofs.write((char*)&nIndexSize, sizeof(uint32_t));
+		uint32_t nMapSize = uint32_t(mapFiles.size());
+		ofs.write((char*)&nMapSize, sizeof(uint32_t));
 		for (auto& e : mapFiles)
 		{
 			// Write the path of the file
 			size_t nPathSize = e.first.size();
-			//			ofs.write((char*)&nPathSize, sizeof(uint32_t));
-			//ofs.write(e.first.c_str(), nPathSize);
+			ofs.write((char*)&nPathSize, sizeof(uint32_t));
+			ofs.write(e.first.c_str(), nPathSize);
 
 			// Write the file entry properties
-			//ofs.write((char*)&e.second.nSize, sizeof(uint32_t));
-			//ofs.write((char*)&e.second.nOffset, sizeof(uint32_t));
+			ofs.write((char*)&e.second.nSize, sizeof(uint32_t));
+			ofs.write((char*)&e.second.nOffset, sizeof(uint32_t));
 		}
 
 		// 2) Write the individual Data
-		//	std::streampos offset = ofs.tellp();
-		//	nIndexSize = (uint32_t)offset;
+		std::streampos offset = ofs.tellp();
+		nIndexSize = (uint32_t)offset;
 		for (auto& e : mapFiles)
 		{
 			// Store beginning of file offset within resource pack file
-		  //		e.second.nOffset = (uint32_t)offset;
+			e.second.nOffset = (uint32_t)offset;
 
 			// Load the file to be added
-			//	std::vector<uint8_t> vBuffer(e.second.nSize);
-			//	std::ifstream i(e.first, std::ifstream::binary);
-			//	i.read((char*)vBuffer.data(), e.second.nSize);
-			//	i.close();
+			std::vector<uint8_t> vBuffer(e.second.nSize);
+			std::ifstream i(e.first, std::ifstream::binary);
+			i.read((char*)vBuffer.data(), e.second.nSize);
+			i.close();
 
 			// Write the loaded file into resource pack file
-			//	ofs.write((char*)vBuffer.data(), e.second.nSize);
-			//	offset += e.second.nSize;
+			ofs.write((char*)vBuffer.data(), e.second.nSize);
+			offset += e.second.nSize;
 		}
 
 		// 3) Scramble Index
@@ -1139,8 +1224,8 @@ namespace olc
 		};
 
 		// Iterate through map
-		//write((char*)&nMapSize, sizeof(uint32_t));
-		/*	for (auto& e : mapFiles)
+		write((char*)&nMapSize, sizeof(uint32_t));
+		for (auto& e : mapFiles)
 		{
 			// Write the path of the file
 			size_t nPathSize = e.first.size();
@@ -1158,15 +1243,15 @@ namespace olc
 		ofs.seekp(0, std::ios::beg);
 		ofs.write((char*)&nIndexStringLen, sizeof(uint32_t));
 		ofs.write(sIndexString.data(), nIndexStringLen);
-		ofs.close();*/
+		ofs.close();
 		return true;
 	}
 
 	ResourceBuffer ResourcePack::GetFileBuffer(const std::string& sFile)
-	{ /*return (ResourceBuffer)nullptr;/*ResourceBuffer(baseFile, mapFiles[sFile].nOffset, mapFiles[sFile].nSize);*/ }
+	{ return ResourceBuffer(baseFile, mapFiles[sFile].nOffset, mapFiles[sFile].nSize); }
 
 	bool ResourcePack::Loaded()
-	{ return false;/*baseFile.is_open();*/ }
+	{ return baseFile.is_open(); }
 
 	std::vector<char> ResourcePack::scramble(const std::vector<char>& data, const std::string& key)
 	{
@@ -1175,14 +1260,14 @@ namespace olc
 		size_t c = 0;
 		for (auto s : data)	o.push_back(s ^ key[(c++) % key.size()]);
 		return o;
-	};
+	}
 
 	std::string ResourcePack::makeposix(const std::string& path)
 	{
 		std::string o;
 		for (auto s : path) o += std::string(1, s == '\\' ? '/' : s);
 		return o;
-	};
+		}
 
 	// O------------------------------------------------------------------------------O
 	// | olc::PixelGameEngine IMPLEMENTATION                                          |
@@ -1214,7 +1299,8 @@ namespace olc
 		if (vPixelSize.x <= 0 || vPixelSize.y <= 0 || vScreenSize.x <= 0 || vScreenSize.y <= 0)
 			return olc::FAIL;
 
-		
+		// Construct default font sheet
+		olc_ConstructFontSheet();
 		return olc::OK;
 	}
 
@@ -1247,9 +1333,7 @@ namespace olc
 
 		// Start the thread
 		bAtomActive = true;
-#if defined(__ATARI_ST__)
-		PixelGameEngine::EngineTread();
-#else
+#if !defined(__ATARI_ST__)
 		std::thread t = std::thread(&PixelGameEngine::EngineThread, this);
 
 		// Some implementations may form an event loop here
@@ -1257,6 +1341,8 @@ namespace olc
 
 		// Wait for thread to be exited
 		t.join();
+#else
+	EngineThread();
 #endif
 		if (platform->ApplicationCleanUp() != olc::OK) return olc::FAIL;
 
@@ -1878,60 +1964,6 @@ namespace olc
 		vLayers[nTargetLayer].vecDecalInstance.push_back(di);
 	}
 
-	void PixelGameEngine::DrawPartialRotatedDecal(const olc::vf2d& pos, olc::Decal* decal, const float fAngle, const olc::vf2d& center, const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::vf2d& scale, const olc::Pixel& tint)
-	{
-		DecalInstance di;
-		di.decal = decal;
-		di.tint = tint;
-		di.pos[0] = (olc::vf2d(0.0f, 0.0f) - center) * scale;
-		di.pos[1] = (olc::vf2d(0.0f, source_size.y) - center) * scale;
-		di.pos[2] = (olc::vf2d(source_size.x, source_size.y) - center) * scale;
-		di.pos[3] = (olc::vf2d(source_size.x, 0.0f) - center) * scale;
-		float c = cos(fAngle), s = sin(fAngle);
-		for (int i = 0; i < 4; i++)
-		{
-			di.pos[i] = pos + olc::vf2d(di.pos[i].x * c - di.pos[i].y * s, di.pos[i].x * s + di.pos[i].y * c);
-			di.pos[i] = di.pos[i] * vInvScreenSize * 2.0f - olc::vf2d(1.0f, 1.0f);
-			di.pos[i].y *= -1.0f;
-		}
-
-		olc::vf2d uvtl = source_pos * decal->vUVScale;
-		olc::vf2d uvbr = uvtl + (source_size * decal->vUVScale);
-		di.uv[0] = { uvtl.x, uvtl.y }; di.uv[1] = { uvtl.x, uvbr.y };
-		di.uv[2] = { uvbr.x, uvbr.y }; di.uv[3] = { uvbr.x, uvtl.y };
-
-		vLayers[nTargetLayer].vecDecalInstance.push_back(di);
-	}
-
-	void PixelGameEngine::DrawPartialWarpedDecal(olc::Decal* decal, const olc::vf2d* pos, const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::Pixel& tint)
-	{
-		DecalInstance di;
-		di.decal = decal;
-		di.tint = tint;
-		olc::vf2d center;
-		float rd = ((pos[2].x - pos[0].x) * (pos[3].y - pos[1].y) - (pos[3].x - pos[1].x) * (pos[2].y - pos[0].y));
-		if (rd != 0)
-		{
-			olc::vf2d uvtl = source_pos * decal->vUVScale; 
-			olc::vf2d uvbr = uvtl + (source_size * decal->vUVScale);
-			di.uv[0] = { uvtl.x, uvtl.y }; di.uv[1] = { uvtl.x, uvbr.y };
-			di.uv[2] = { uvbr.x, uvbr.y }; di.uv[3] = { uvbr.x, uvtl.y };
-
-			rd = 1.0f / rd;
-			float rn = ((pos[3].x - pos[1].x) * (pos[0].y - pos[1].y) - (pos[3].y - pos[1].y) * (pos[0].x - pos[1].x)) * rd;
-			float sn = ((pos[2].x - pos[0].x) * (pos[0].y - pos[1].y) - (pos[2].y - pos[0].y) * (pos[0].x - pos[1].x)) * rd;
-			if (!(rn < 0.f || rn > 1.f || sn < 0.f || sn > 1.f)) center = pos[0] + rn * (pos[2] - pos[0]);
-			float d[4];	for (int i = 0; i < 4; i++)	d[i] = (pos[i] - center).mag();
-			for (int i = 0; i < 4; i++)
-			{
-				float q = d[i] == 0.0f ? 1.0f : (d[i] + d[(i + 2) & 3]) / d[(i + 2) & 3];
-				di.uv[i] *= q; di.w[i] *= q;
-				di.pos[i] = { (pos[i].x * vInvScreenSize.x) * 2.0f - 1.0f, ((pos[i].y * vInvScreenSize.y) * 2.0f - 1.0f) * -1.0f };
-			}			
-			vLayers[nTargetLayer].vecDecalInstance.push_back(di);
-		}
-	}
-
 	void PixelGameEngine::DrawWarpedDecal(olc::Decal* decal, const olc::vf2d* pos, const olc::Pixel& tint)
 	{
 		// Thanks Nathan Reed, a brilliant article explaining whats going on here
@@ -1959,34 +1991,13 @@ namespace olc
 	}
 
 	void PixelGameEngine::DrawWarpedDecal(olc::Decal* decal, const std::array<olc::vf2d, 4>& pos, const olc::Pixel& tint)
-	{ DrawWarpedDecal(decal, pos.data(), tint);	}
+	{
+		DrawWarpedDecal(decal, pos.data(), tint);
+	}
 
 	void PixelGameEngine::DrawWarpedDecal(olc::Decal* decal, const olc::vf2d(&pos)[4], const olc::Pixel& tint)
-	{ DrawWarpedDecal(decal, &pos[0], tint); }
-
-	void PixelGameEngine::DrawPartialWarpedDecal(olc::Decal* decal, const std::array<olc::vf2d, 4>& pos, const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::Pixel& tint)
-	{ DrawPartialWarpedDecal(decal, pos.data(), source_pos, source_size, tint); }
-
-	void PixelGameEngine::DrawPartialWarpedDecal(olc::Decal* decal, const olc::vf2d(&pos)[4], const olc::vf2d& source_pos, const olc::vf2d& source_size, const olc::Pixel& tint)
-	{ DrawPartialWarpedDecal(decal, &pos[0], source_pos, source_size, tint); }
-	   
-	void PixelGameEngine::DrawStringDecal(const olc::vf2d& pos, const std::string& sText, const Pixel col, const olc::vf2d& scale)
 	{
-		olc::vf2d spos = { 0.0f, 0.0f };
-		for (auto c : sText)
-		{
-			if (c == '\n')
-			{
-				spos.x = 0; spos.y += 8.0f * scale.y;
-			}
-			else
-			{
-				int32_t ox = (c - 32) % 16;
-				int32_t oy = (c - 32) / 16;
-				DrawPartialDecal(pos + spos, fontDecal, { float(ox) * 8.0f, float(oy) * 8.0f }, { 8.0f, 8.0f }, scale, col);
-				spos.x += 8.0f * scale.x;
-			}
-		}
+		DrawWarpedDecal(decal, &pos[0], tint);		
 	}
 
 	void PixelGameEngine::DrawString(const olc::vi2d& pos, const std::string& sText, Pixel col, uint32_t scale)
@@ -2157,9 +2168,6 @@ namespace olc
 		// Start OpenGL, the context is owned by the game thread
 		if (platform->CreateGraphics(bFullScreen, bEnableVSYNC, vViewPos, vViewSize) == olc::FAIL) return;
 
-		// Construct default font sheet
-		olc_ConstructFontSheet();
-
 		// Create Primary Layer "0"
 		CreateLayer();
 		vLayers[0].bUpdate = true;
@@ -2312,8 +2320,6 @@ namespace olc
 				if (++py == 48) { px++; py = 0; }
 			}
 		}
-
-		fontDecal = new olc::Decal(fontSprite);
 	}
 
 	// Need a couple of statics as these are singleton instances
@@ -2322,7 +2328,7 @@ namespace olc
 	olc::PixelGameEngine* olc::PGEX::pge = nullptr;
 	olc::PixelGameEngine* olc::Platform::ptrPGE = nullptr;
 	olc::PixelGameEngine* olc::Renderer::ptrPGE = nullptr;
-};
+}
 
 
 
@@ -2331,8 +2337,144 @@ namespace olc
 // O------------------------------------------------------------------------------O
 
 // O------------------------------------------------------------------------------O
+// | START RENDERER: Atari ST software renderer                                   |
+// O------------------------------------------------------------------------------O
+#if defined(OLC_GFX_ATARI_ST)
+#include <osbind.h> //TOS mappings
+#include <png.h>
+namespace olc
+{
+	class Renderer_Atari_ST : public olc::Renderer
+	{
+	private:
+	  short buff1[8064],buff2[8064];
+	    short *b1,*b2;
+            // c2p buffer
+            struct c2p_st {
+	      uint8_t p0w1,p0w0,p1w1,p1w0,p2w1,p2w0,p3w1,p3w0;
+	    };
+            c2p_st c2p_buffer;
+	public:
+	olc::Sprite* c2pConvert(olc::Sprite* s)
+        {
+	  int x,y,xp;
+	  uint16_t cpixels[16];
+	  uint16_t lpal[16];
+	  olc::Sprite* ts=new SpriteST(s->width,s->height);
+	  for (y=0; y>s->height; y++) 
+	    {
+	      for (x=0; x<s->width; x+=16)
+		{
+		 
+		   
+		}
+	    }
+        }
+
+		void PrepareDevice() override
+		{ }
+
+		olc::rcode CreateDevice(std::vector<void*> params, bool bFullScreen, bool bVSYNC) override
+		{
+		  // Some code in atari_st_renderer.s for speed
+#if defined(_DEBUG_)
+		  std::cout << "Atari ST software renderer" << std::endl;
+		  
+#endif
+		  //buffer must be at even 256
+		  b1=&buff1[0];
+		 
+		  b1+=64;
+
+		  b1=(short *)((int)b1 & (int)0xffffff00);
+		  b2 = (short*)Physbase(); //Get first buffer adress
+#if defined(_DEBUG_)
+		  std::cout << "Physbase:" << b2 << std::endl;
+		  std::cout << "Logbase:" << b1 << std::endl;
+		  char tmp;
+		  std::cout << "?";
+		  std::cin >> tmp;
+#endif
+		  Setscreen(b2,b1,0);
+		  return olc::rcode::OK;
+		}
+
+		olc::rcode DestroyDevice() override
+		{
+		  (void) Setscreen(b2,b2,0); //Set Physbase and Logbase to same
+			return olc::rcode::FAIL;
+		}
+
+		void DisplayFrame() override
+		{
+		  // Swap Buffers
+		  short *tmp;
+		  tmp=b1;
+		  b1=b2;
+		  b2=tmp;
+		  (void) Setscreen(b1,b2,0);
+		}
+
+		void PrepareDrawing() override
+		{
+
+		}
+
+		void DrawLayerQuad(const olc::vf2d& offset, const olc::vf2d& scale, const olc::Pixel tint) override
+		{
+//c2p convert
+
+		}
+
+		void DrawDecalQuad(const olc::DecalInstance& decal) override
+		{
+
+		}
+
+		uint32_t CreateTexture(const uint32_t width, const uint32_t height) override
+		{
+
+                     return 0;
+		}
+
+		void UpdateTexture(uint32_t id, olc::Sprite* spr) override
+		{
+
+		}
+
+		void ApplyTexture(uint32_t id) override
+		{
+
+		}
+
+		void ClearBuffer(olc::Pixel p, bool bDepth) override
+		{
+		  short* tmp;
+
+		  // Clear
+		  tmp=b1;
+
+		  for (int i=0;i<=8000;i++)
+		    *tmp++=0;
+		}
+
+		void UpdateViewport(const olc::vi2d& pos, const olc::vi2d& size) override
+		{
+
+		}
+	};
+}
+
+#endif
+// O------------------------------------------------------------------------------O
+// | END RENDERER: Atari ST sw                                                    |
+// O------------------------------------------------------------------------------O
+// O------------------------------------------------------------------------------O
 // | START RENDERER: OpenGL 1.0 (the original, the best...)                       |
 // O------------------------------------------------------------------------------O
+#if defined(__ATARI_ST__)
+
+#else
 #if defined(OLC_GFX_OPENGL10)
 #if defined(_WIN32)
 	#include <windows.h>
@@ -2343,7 +2485,7 @@ namespace olc
 	typedef HGLRC glRenderContext_t;
 #endif
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 	#include <GL/gl.h>
 	namespace X11
 	{
@@ -2358,8 +2500,6 @@ namespace olc
 	typedef X11::GLXContext glRenderContext_t;
 #endif
 #if defined(__APPLE__)
-#include <OpenGL/gl.h>
-#include <cocoawindowing.h>
 #include <png.h>
 #endif
 namespace olc
@@ -2367,20 +2507,10 @@ namespace olc
 	class Renderer_OGL10 : public olc::Renderer
 	{
 	private:
-#if defined(__APPLE__)
-        uint32_t olc_Display = 0;
-        uint32_t olc_Window = 0;
-        uint32_t olc_VisualInfo = 0;
-#else
-        glDeviceContext_t glDeviceContext = 0;
+		glDeviceContext_t glDeviceContext = 0;
 		glRenderContext_t glRenderContext = 0;
-<<<<<<< HEAD
-#endif
-	#if defined(__linux__)
-=======
 
-	#if defined(__linux__) || defined(__FreeBSD__)
->>>>>>> 66d92a105926a4799008c1160b761febcd7e33fc
+	#if defined(__linux__)
 		X11::Display*				 olc_Display = nullptr;
 		X11::Window*				 olc_Window = nullptr;
 		X11::XVisualInfo*            olc_VisualInfo = nullptr;
@@ -2415,7 +2545,7 @@ namespace olc
 			if (wglSwapInterval && !bVSYNC) wglSwapInterval(0);
 		#endif
 
-		#if defined(__linux__) || defined(__FreeBSD__)
+		#if defined(__linux__)
 			using namespace X11;
 			// Linux has tighter coupling between OpenGL and X11, so we store
 			// various "platform" handles in the renderer
@@ -2455,11 +2585,11 @@ namespace olc
 			wglDeleteContext(glRenderContext);
 		#endif
 
-		#if defined(__linux__) || defined(__FreeBSD__)
+		#if defined(__linux__)
 			glXMakeCurrent(olc_Display, None, NULL);
 			glXDestroyContext(olc_Display, glDeviceContext);
 		#endif
-			return olc::rcode::OK;
+			return olc::rcode::FAIL;
 		}
 
 		void DisplayFrame() override
@@ -2468,7 +2598,7 @@ namespace olc
 			SwapBuffers(glDeviceContext);
 		#endif	
 
-		#if defined(__linux__) || defined(__FreeBSD__)
+		#if defined(__linux__)
 			X11::glXSwapBuffers(olc_Display, *olc_Window);
 		#endif		
 		}
@@ -2517,12 +2647,6 @@ namespace olc
 			return id;
 		}
 
-		uint32_t DeleteTexture(const uint32_t id) override
-		{
-			glDeleteTextures(1, &id);			
-			return id;
-		}
-
 		void UpdateTexture(uint32_t id, olc::Sprite* spr) override
 		{
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, spr->width, spr->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, spr->GetData());
@@ -2546,6 +2670,7 @@ namespace olc
 		}
 	};
 }
+#endif
 #endif
 // O------------------------------------------------------------------------------O
 // | END RENDERER: OpenGL 1.0 (the original, the best...)                         |
@@ -2666,8 +2791,6 @@ namespace olc
 			DWORD dwExStyle = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
 			DWORD dwStyle = WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_THICKFRAME;
 
-			olc::vi2d vTopLeft = vWindowPos;
-
 			// Handle Fullscreen
 			if (bFullScreen)
 			{
@@ -2677,8 +2800,6 @@ namespace olc
 				MONITORINFO mi = { sizeof(mi) };
 				if (!GetMonitorInfo(hmon, &mi)) return olc::rcode::FAIL;
 				vWindowSize = { mi.rcMonitor.right, mi.rcMonitor.bottom };
-				vTopLeft.x = 0;
-				vTopLeft.y = 0;
 			}
 
 			// Keep client size as requested
@@ -2688,7 +2809,7 @@ namespace olc
 			int height = rWndRect.bottom - rWndRect.top;
 
 			olc_hWnd = CreateWindowEx(dwExStyle, olcT("OLC_PIXEL_GAME_ENGINE"), olcT(""), dwStyle,
-				vTopLeft.x, vTopLeft.y, width, height, NULL, NULL, GetModuleHandle(nullptr), this);
+				vWindowPos.x, vWindowPos.y, width, height, NULL, NULL, GetModuleHandle(nullptr), this);
 
 			// Create Keyboard Mapping
 			mapKeys[0x00] = Key::NONE;
@@ -2822,7 +2943,7 @@ namespace olc
 // O------------------------------------------------------------------------------O
 // | START PLATFORM: LINUX                                                        |
 // O------------------------------------------------------------------------------O
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 namespace olc
 {
 	class Platform_Linux : public olc::Platform
@@ -3151,12 +3272,12 @@ namespace olc
     class Platform_Apple : public olc::Platform
     {
     private:
-       uint32_t                olc_Display = NULL;
-        //X11::Window                     olc_WindowRoot;
-        uint32_t                    olc_Window;
-        uint32_t             olc_VisualInfo;
-        uint32_t                olc_ColourMap;
-        uint32_t    olc_SetWindowAttribs;
+        X11::Display*                olc_Display = nullptr;
+        X11::Window                     olc_WindowRoot;
+        X11::Window                     olc_Window;
+        X11::XVisualInfo*             olc_VisualInfo;
+        X11::Colormap                olc_ColourMap;
+        X11::XSetWindowAttributes    olc_SetWindowAttribs;
         
     public:
         virtual olc::rcode ApplicationStartUp() override
@@ -3176,7 +3297,7 @@ namespace olc
         
         virtual olc::rcode CreateGraphics(bool bFullScreen, bool bEnableVSYNC, const olc::vi2d& vViewPos, const olc::vi2d& vViewSize) override
         {
-            if (renderer->CreateDevice({ &olc_Display, &olc_Window, &olc_VisualInfo }, bFullScreen, bEnableVSYNC) == olc::rcode::OK)
+            if (renderer->CreateDevice({ olc_Display, &olc_Window, olc_VisualInfo }, bFullScreen, bEnableVSYNC) == olc::rcode::OK)
             {
                 renderer->UpdateViewport(vViewPos, vViewSize);
                 return olc::rcode::OK;
@@ -3187,36 +3308,62 @@ namespace olc
         
         virtual olc::rcode CreateWindowPane(const olc::vi2d& vWindowPos, olc::vi2d& vWindowSize, bool bFullScreen) override
         {
-            init_application();
-            uint32_t nWindowWidth = vWindowSize.x;
-            uint32_t nWindowHeight = vWindowSize.y;
-            create_window("Tests", nWindowWidth, nWindowHeight);
+            using namespace X11;
+            XInitThreads();
             
-            set_window_background_color(0, 0, 0, 1);
-            set_window_title_bar_hidden (false);
-            set_window_title_hidden (false);
-            set_window_resizable(false);
-            process_window_events();
-            bool outOfBounds = false;
-           /* while ((nWindowWidth >= get_screen_width() || nWindowHeight >= get_screen_height()) && (nPixelWidth > 0 || nPixelHeight > 0)) {
-                outOfBounds = false;
-                nWindowWidth = nScreenWidth * (--nPixelWidth);
-                nWindowHeight = nScreenHeight * (--nPixelHeight);
-                set_window_size(nWindowWidth, nWindowHeight);
-            }*/
+            // Grab the deafult display and window
+            olc_Display = XOpenDisplay(NULL);
+            olc_WindowRoot = DefaultRootWindow(olc_Display);
             
-            /*if (outOfBounds) {
-                if (nPixelWidth == 0 || nPixelHeight == 0) {
-                    std::cout << std::endl << "The screen dimension given cannot fit on your screen." << std::endl << std::endl;
-                    return olc::rcode::FAIL;
-                }
-                else {
-                    std::cout << std::endl << "Had to lower pixel dimension in order to fit on screen." << std::endl << std::endl;
-                }
-            }*/
+            // Based on the display capabilities, configure the appearance of the window
+            GLint olc_GLAttribs[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
+            olc_VisualInfo = glXChooseVisual(olc_Display, 0, olc_GLAttribs);
+            olc_ColourMap = XCreateColormap(olc_Display, olc_WindowRoot, olc_VisualInfo->visual, AllocNone);
+            olc_SetWindowAttribs.colormap = olc_ColourMap;
+            
+            // Register which events we are interested in receiving
+            olc_SetWindowAttribs.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask |
+            ButtonPressMask | ButtonReleaseMask | PointerMotionMask | FocusChangeMask | StructureNotifyMask;
+            
+            // Create the window
+            olc_Window = XCreateWindow(olc_Display, olc_WindowRoot, vWindowPos.x, vWindowPos.y,
+                                       vWindowSize.x, vWindowSize.y,
+                                       0, olc_VisualInfo->depth, InputOutput, olc_VisualInfo->visual,
+                                       CWColormap | CWEventMask, &olc_SetWindowAttribs);
+            
+            Atom wmDelete = XInternAtom(olc_Display, "WM_DELETE_WINDOW", true);
+            XSetWMProtocols(olc_Display, olc_Window, &wmDelete, 1);
+            
+            XMapWindow(olc_Display, olc_Window);
+            XStoreName(olc_Display, olc_Window, "OneLoneCoder.com - Pixel Game Engine");
+            
+            if (bFullScreen) // Thanks DragonEye, again :D
+            {
+                Atom wm_state;
+                Atom fullscreen;
+                wm_state = XInternAtom(olc_Display, "_NET_WM_STATE", False);
+                fullscreen = XInternAtom(olc_Display, "_NET_WM_STATE_FULLSCREEN", False);
+                XEvent xev{ 0 };
+                xev.type = ClientMessage;
+                xev.xclient.window = olc_Window;
+                xev.xclient.message_type = wm_state;
+                xev.xclient.format = 32;
+                xev.xclient.data.l[0] = (bFullScreen ? 1 : 0);   // the action (0: off, 1: on, 2: toggle)
+                xev.xclient.data.l[1] = fullscreen;             // first property to alter
+                xev.xclient.data.l[2] = 0;                      // second property to alter
+                xev.xclient.data.l[3] = 0;                      // source indication
+                XMapWindow(olc_Display, olc_Window);
+                XSendEvent(olc_Display, DefaultRootWindow(olc_Display), False,
+                           SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+                XFlush(olc_Display);
+                XWindowAttributes gwa;
+                XGetWindowAttributes(olc_Display, olc_Window, &gwa);
+                vWindowSize.x = gwa.width;
+                vWindowSize.y = gwa.height;
+            }
             
             // Create Keyboard Mapping
-            /*mapKeys[0x00] = Key::NONE;
+            mapKeys[0x00] = Key::NONE;
             mapKeys[0x61] = Key::A; mapKeys[0x62] = Key::B; mapKeys[0x63] = Key::C; mapKeys[0x64] = Key::D; mapKeys[0x65] = Key::E;
             mapKeys[0x66] = Key::F; mapKeys[0x67] = Key::G; mapKeys[0x68] = Key::H; mapKeys[0x69] = Key::I; mapKeys[0x6A] = Key::J;
             mapKeys[0x6B] = Key::K; mapKeys[0x6C] = Key::L; mapKeys[0x6D] = Key::M; mapKeys[0x6E] = Key::N; mapKeys[0x6F] = Key::O;
@@ -3243,13 +3390,13 @@ namespace olc
             mapKeys[XK_KP_0] = Key::NP0; mapKeys[XK_KP_1] = Key::NP1; mapKeys[XK_KP_2] = Key::NP2; mapKeys[XK_KP_3] = Key::NP3; mapKeys[XK_KP_4] = Key::NP4;
             mapKeys[XK_KP_5] = Key::NP5; mapKeys[XK_KP_6] = Key::NP6; mapKeys[XK_KP_7] = Key::NP7; mapKeys[XK_KP_8] = Key::NP8; mapKeys[XK_KP_9] = Key::NP9;
             mapKeys[XK_KP_Multiply] = Key::NP_MUL; mapKeys[XK_KP_Add] = Key::NP_ADD; mapKeys[XK_KP_Divide] = Key::NP_DIV; mapKeys[XK_KP_Subtract] = Key::NP_SUB; mapKeys[XK_KP_Decimal] = Key::NP_DECIMAL;
-            */
+            
             return olc::OK;
         }
         
         virtual olc::rcode SetWindowTitle(const std::string& s) override
         {
-           /* X11::XStoreName(olc_Display, olc_Window, s.c_str());*/
+            X11::XStoreName(olc_Display, olc_Window, s.c_str());
             return olc::OK;
         }
         
@@ -3258,7 +3405,7 @@ namespace olc
         
         virtual olc::rcode HandleSystemEvent() override
         {
-           /* using namespace X11;
+            using namespace X11;
             // Handle Xlib Message Loop - we do this in the
             // same thread that OpenGL was created so we dont
             // need to worry too much about multithreading with X11
@@ -3331,7 +3478,7 @@ namespace olc
                 {
                     ptrPGE->olc_Terminate();
                 }
-            }*/
+            }
             return olc::OK;
         }
     };
@@ -3342,9 +3489,7 @@ namespace olc
         ((std::istream*)a)->read((char*)data, length);
     }
     
-    olc::rcode Sprite::LoadFromFile(const std::string& sImageFile, olc::ResourcePack* pack)
-    {
-        UNUSED(pack);
+    
         ////////////////////////////////////////////////////////////////////////////
         // Use libpng, Thanks to Guillaume Cottenceau
         // https://gist.github.com/niw/5963798
@@ -3437,7 +3582,172 @@ namespace olc
 }
 #endif
 // O------------------------------------------------------------------------------O
-// | END PLATFORM: Apple                                                         |
+// | END PLATFORM: Apple                                                          |
+// O------------------------------------------------------------------------------O
+// O------------------------------------------------------------------------------O
+// | START PLATFORM: Atari ST                                                     |
+// O------------------------------------------------------------------------------O
+#if defined(__ATARI_ST__)
+
+namespace olc
+{
+    class Platform_Atari_ST : public olc::Platform
+    {
+    private:
+
+        
+    public:
+        virtual olc::rcode ApplicationStartUp() override
+        { return olc::rcode::OK; }
+        
+        virtual olc::rcode ApplicationCleanUp() override
+        { return olc::rcode::OK; }
+        
+        virtual olc::rcode ThreadStartUp() override
+        { return olc::rcode::OK; }
+        
+        virtual olc::rcode ThreadCleanUp() override
+        {
+            renderer->DestroyDevice();
+            return olc::OK;
+        }
+        
+        virtual olc::rcode CreateGraphics(bool bFullScreen, bool bEnableVSYNC, const olc::vi2d& vViewPos, const olc::vi2d& vViewSize) override
+        {
+            if (renderer->CreateDevice({ }, bFullScreen, bEnableVSYNC) == olc::rcode::OK)
+            {
+                renderer->UpdateViewport(vViewPos, vViewSize);
+                return olc::rcode::OK;
+            }
+            else
+                return olc::rcode::FAIL;
+        }
+        
+        virtual olc::rcode CreateWindowPane(const olc::vi2d& vWindowPos, olc::vi2d& vWindowSize, bool bFullScreen) override
+        {
+            // Create Keyboard Mapping
+             return olc::OK;
+        }
+        
+        virtual olc::rcode SetWindowTitle(const std::string& s) override
+        {
+ 
+            return olc::OK;
+        }
+        
+        virtual olc::rcode StartSystemEventLoop() override
+        {    return olc::OK;    }
+        
+        virtual olc::rcode HandleSystemEvent() override
+        {
+ 
+            return olc::OK;
+        }
+    };
+    
+    void pngReadStream(png_structp pngPtr, png_bytep data, png_size_t length)
+    {
+        png_voidp a = png_get_io_ptr(pngPtr);
+        ((std::istream*)a)->read((char*)data, length);
+    }
+    
+    olc::rcode Sprite::LoadFromFile(const std::string& sImageFile, olc::ResourcePack* pack)
+    {
+//       UNUSED(pack);
+        ////////////////////////////////////////////////////////////////////////////
+        // Use libpng, Thanks to Guillaume Cottenceau
+        // https://gist.github.com/niw/5963798
+        
+        // Also reading png from streams
+        // http://www.piko3d.net/tutorials/libpng-tutorial-loading-png-files-from-streams/
+        
+        png_structp png;
+        png_infop info;
+        
+        auto loadPNG = [&]()
+        {
+            png_read_info(png, info);
+            png_byte color_type;
+            png_byte bit_depth;
+            png_bytep* row_pointers;
+            width = png_get_image_width(png, info);
+            height = png_get_image_height(png, info);
+            color_type = png_get_color_type(png, info);
+            bit_depth = png_get_bit_depth(png, info);
+            if (bit_depth == 16) png_set_strip_16(png);
+            if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+            if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)    png_set_expand_gray_1_2_4_to_8(png);
+            if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+            if (color_type == PNG_COLOR_TYPE_RGB ||
+                color_type == PNG_COLOR_TYPE_GRAY ||
+                color_type == PNG_COLOR_TYPE_PALETTE)
+                png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+            if (color_type == PNG_COLOR_TYPE_GRAY ||
+                color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+                png_set_gray_to_rgb(png);
+            png_read_update_info(png, info);
+            row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * height);
+            for (int y = 0; y < height; y++) {
+                row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
+            }
+            png_read_image(png, row_pointers);
+            ////////////////////////////////////////////////////////////////////////////
+            // Create sprite array
+            pColData = new Pixel[width * height];
+            // Iterate through image rows, converting into sprite format
+            for (int y = 0; y < height; y++)
+            {
+                png_bytep row = row_pointers[y];
+                for (int x = 0; x < width; x++)
+                {
+                    png_bytep px = &(row[x * 4]);
+                    SetPixel(x, y, Pixel(px[0], px[1], px[2], px[3]));
+                }
+            }
+            
+            for (int y = 0; y < height; y++) // Thanks maksym33
+                free(row_pointers[y]);
+            free(row_pointers);
+            png_destroy_read_struct(&png, &info, nullptr);
+        };
+        
+        png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+        if (!png) goto fail_load;
+        
+        info = png_create_info_struct(png);
+        if (!info) goto fail_load;
+        
+        if (setjmp(png_jmpbuf(png))) goto fail_load;
+        
+/*        if (pack == nullptr)
+        {
+            FILE* f = fopen(sImageFile.c_str(), "rb");
+            if (!f) return olc::NO_FILE;
+            png_init_io(png, f);
+            loadPNG();
+            fclose(f);
+	    }*/
+        else
+        {
+           /* ResourceBuffer rb = pack->GetFileBuffer(sImageFile);
+            std::istream is(&rb);
+            png_set_read_fn(png, (png_voidp)&is, pngReadStream);
+            loadPNG();*/
+        }
+        
+        return olc::OK;
+        
+    fail_load:
+        width = 0;
+        height = 0;
+        pColData = nullptr;
+
+        return olc::FAIL;
+    }
+} // Namespace olc
+#endif
+// O------------------------------------------------------------------------------O
+// | END PLATFORM: Atari ST                                                       |
 // O------------------------------------------------------------------------------O
 
 namespace olc
@@ -3448,14 +3758,17 @@ namespace olc
 		platform = std::make_unique<olc::Platform_Windows>();
 #endif
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 		platform = std::make_unique<olc::Platform_Linux>();
 #endif
 
-#if defined(__APPLE__)
-        platform = std::make_unique<olc::Platform_Apple>();
+#if defined(__ATARI_ST__)
+		platform = std::make_unique<olc::Platform_Atari_ST>();
+		renderer = std::make_unique<olc::Renderer_Atari_ST>();
+#if defined(OLC_GFX_OPENGL10)
+#undef OLC_GFX_OPENGL10
 #endif
-        
+#endif
 #if defined(OLC_GFX_OPENGL10)
 		renderer = std::make_unique<olc::Renderer_OGL10>();
 #endif
