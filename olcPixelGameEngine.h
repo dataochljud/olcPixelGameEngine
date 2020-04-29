@@ -182,28 +182,50 @@ int main()
 #ifndef OLC_PGE_DEF
 #define OLC_PGE_DEF
 
+// use during development - remove when finished
+#define __ATARI_ST__
+#define __WITH_STDIO__
+#define _DEBUG_
+#if !defined(_DEBUG_)
+#define _DEBUG_ 0
+#else
+#define _DEBUG_ 1
+#endif
+
 // O------------------------------------------------------------------------------O
 // | STANDARD INCLUDES                                                            |
 // O------------------------------------------------------------------------------O
 #include <cmath>
 #include <cstdint>
 #include <string>
+#if defined(__WITH_STDIO__)
+#include <cstdio>
+#else
 #include <iostream>
+#endif
+#if !defined(__WITH_STDIO__)
 #include <streambuf>
 #include <sstream>
+#endif
 #include <chrono>
 #include <vector>
 #include <list>
+#if defined(__ATARI_ST__)
+#include <stthread.h>
+#else
 #include <thread>
+#endif
 #include <atomic>
 #include <condition_variable>
+#if !defined(__WITH_STDIO__)
 #include <fstream>
+#endif
 #include <map>
 #include <functional>
 #include <algorithm>
 #include <array>
 #include <cstring>
-//#include <sys/statvfs.h>
+
 // O------------------------------------------------------------------------------O
 // | COMPILER CONFIGURATION ODDITIES                                              |
 // O------------------------------------------------------------------------------O
@@ -236,7 +258,7 @@ int main()
 	// C++14
 	#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
 	#include <filesystem>
-	namespace _gfs = std::filesystem;
+//	namespace _gfs = std::filesystem;
 
 #else
 	// C++17
@@ -395,13 +417,13 @@ namespace olc
 	// O------------------------------------------------------------------------------O
 	// | olc::ResourcePack - A virtual scrambled filesystem to pack your assets into  |
 	// O------------------------------------------------------------------------------O
-	struct ResourceBuffer : public std::streambuf
+	/*	struct ResourceBuffer : public std::streambuf
 	{
 		ResourceBuffer(std::ifstream &ifs, uint32_t offset, uint32_t size);
 		std::vector<char> vMemory;
 	};
 
-	class ResourcePack : public std::streambuf
+	class ResourcePack #if !defined(__WITH_STDIO__): public std::streambuf#endif
 	{
 	public:
 		ResourcePack();
@@ -414,10 +436,14 @@ namespace olc
 	private:
 		struct sResourceFile { uint32_t nSize; uint32_t nOffset; };
 		std::map<std::string, sResourceFile> mapFiles;
+#if !defined(__WITH_STDIO)
 		std::ifstream baseFile;
+#else
+
+#endif
 		std::vector<char> scramble(const std::vector<char>& data, const std::string& key);
 		std::string makeposix(const std::string& path);
-	};
+		};*/
 
 
 
@@ -428,13 +454,25 @@ namespace olc
 	{
 	public:
 		Sprite();
+#if !defined(__WITH_STDIO__)
 		Sprite(const std::string& sImageFile, olc::ResourcePack *pack = nullptr);
+#else
+		Sprite(const std::string& sImageFile, char *pack = nullptr);
+#endif
 		Sprite(int32_t w, int32_t h);
 		~Sprite();
 
 	public:
+#if !defined(__WITH_STDIO__)
 		olc::rcode LoadFromFile(const std::string& sImageFile, olc::ResourcePack *pack = nullptr);
+#else
+		olc::rcode LoadFromFile(const std::string& sImageFile, char *pack = nullptr);
+#endif
+#if !defined(__WITH_STDIO__)
 		olc::rcode LoadFromPGESprFile(const std::string& sImageFile, olc::ResourcePack *pack = nullptr);
+#else
+		olc::rcode LoadFromPGESprFile(const std::string& sImageFile, char *pack = nullptr);
+#endif
 		olc::rcode SaveToPGESprFile(const std::string& sImageFile);
 
 	public:
@@ -455,6 +493,7 @@ namespace olc
 		Pixel *pColData = nullptr;
 		Mode modeSample = Mode::NORMAL;
 	};
+#if defined(__ATARI_ST__)
 	class SpriteST : public olc::Sprite
 	{
 	private:
@@ -537,7 +576,10 @@ namespace olc
 				      used_colors++;
 				      if(used_colors==16)
 					if(_DEBUG_)
+#if !defined(__WITH_STDIO__)
 					  std::cout << "All colors used in sprite!" << std::endl;
+#else
+				      printf("All colors used in sprite!\n");
 				    }
 			    } /* else */
 			  if (p % 2) {pixel_word[p] = pixel_word[p] | (pixel_color_nr << 4);  }
@@ -565,6 +607,7 @@ namespace olc
 	    }
 	      
 	};
+#endif
 	// O------------------------------------------------------------------------------O
 	// | olc::Decal - A GPU resident storage of an olc::Sprite                        |
 	// O------------------------------------------------------------------------------O
@@ -930,9 +973,14 @@ namespace olc
 	Sprite::Sprite()
 	{ pColData = nullptr; width = 0; height = 0; }
 
+#if !defined(__WITH_STDIO__)
 	Sprite::Sprite(const std::string& sImageFile, olc::ResourcePack *pack)
 	{ LoadFromFile(sImageFile, pack); }
+#else
+	Sprite::Sprite(const std::string& sImageFile, char *pack)
+	{ LoadFromFile(sImageFile, pack); }
 
+#endif
 	Sprite::Sprite(int32_t w, int32_t h)
 	{
 		if(pColData) delete[] pColData;
@@ -945,7 +993,7 @@ namespace olc
 	Sprite::~Sprite()
 	{ if (pColData) delete[] pColData; }
 
-
+#if !defined(__WITH_STDIO__)
 	olc::rcode Sprite::LoadFromPGESprFile(const std::string& sImageFile, olc::ResourcePack *pack)
 	{
 	  	if (pColData) delete[] pColData;
@@ -961,31 +1009,38 @@ namespace olc
 		// which load very fast, but are completely uncompressed
 		if (false)
 		{
-			std::ifstream ifs;
+#if !defined(__WITH_STD_IO__)
+			#include <stdlib.h>
+		  std::ifstream ifs;
 			ifs.open(sImageFile, std::ifstream::binary);
 			if (ifs.is_open())
-			{
-				ReadData(ifs);
-				return olc::OK;
-			}
+			  {
+			  ReadData(ifs);
+			  return olc::OK;
+			  }
 			else
-				return olc::FAIL;
+			  return olc::FAIL;
+#endif
 		}
 		else
-		{
-		  	ResourceBuffer rb = pack->GetFileBuffer(sImageFile);
+		  {
+#if !defined(__WITH_STDIO__)
+		  ResourceBuffer rb = pack->GetFileBuffer(sImageFile);
 			std::istream is(&rb);
 			ReadData(is);
 			return olc::OK;
-		}
+#endif
+		  }
 		return olc::FAIL;
-	  return olc::FAIL;
+		return olc::FAIL;
 	}
-
+	#else
+	olc::rcode Sprite::LoadFromPGESprFile(const std::string& sImageFile, char *pack) { return olc::FAIL;}
+#endif
 	olc::rcode Sprite::SaveToPGESprFile(const std::string& sImageFile)
 	{
 		if (pColData == nullptr) return olc::FAIL;
-
+#if !defined(__WITH_STDIO__)
 		std::ofstream ofs;
 		ofs.open(sImageFile, std::ifstream::binary);
 		if (ofs.is_open())
@@ -996,7 +1051,7 @@ namespace olc
 			ofs.close();
 			return olc::OK;
 		}
-	
+#endif
 		return olc::FAIL;
 	}
 
@@ -1098,7 +1153,7 @@ namespace olc
 	//=============================================================
 	// Resource Packs - Allows you to store files in one large 
 	// scrambled file - Thanks MaGetzUb for debugging a null char in std::stringstream bug
-	ResourceBuffer::ResourceBuffer(std::ifstream& ifs, uint32_t offset, uint32_t size)
+	/*	ResourceBuffer::ResourceBuffer(std::ifstream& ifs, uint32_t offset, uint32_t size)
 	{
 		vMemory.resize(size);
 		ifs.seekg(offset); ifs.read(vMemory.data(), vMemory.size());
@@ -1112,14 +1167,14 @@ namespace olc
 	{
 		const std::string file = makeposix(sFile);
 
-	/*	if (_gfs::exists(file))
+		if (_gfs::exists(file))
 		{
 			sResourceFile e;
 			e.nSize = (uint32_t)_gfs::file_size(file);
 			e.nOffset = 0; // Unknown at this stage			
 			mapFiles[file] = e;
 			return true;
-			}*/
+			}
 		return false;
 	}
 
@@ -1268,7 +1323,7 @@ namespace olc
 		for (auto s : path) o += std::string(1, s == '\\' ? '/' : s);
 		return o;
 		}
-
+*/
 	// O------------------------------------------------------------------------------O
 	// | olc::PixelGameEngine IMPLEMENTATION                                          |
 	// O------------------------------------------------------------------------------O
@@ -2378,8 +2433,11 @@ namespace olc
 		{
 		  // Some code in atari_st_renderer.s for speed
 #if defined(_DEBUG_)
+#if !defined(__WITH_STDIO__)
 		  std::cout << "Atari ST software renderer" << std::endl;
-		  
+#else
+		  printf("Atari ST software renderer\n");
+#endif
 #endif
 		  //buffer must be at even 256
 		  b1=&buff1[0];
@@ -2389,11 +2447,20 @@ namespace olc
 		  b1=(short *)((int)b1 & (int)0xffffff00);
 		  b2 = (short*)Physbase(); //Get first buffer adress
 #if defined(_DEBUG_)
+#if !defined(__WITH_STDIO__)
 		  std::cout << "Physbase:" << b2 << std::endl;
 		  std::cout << "Logbase:" << b1 << std::endl;
 		  char tmp;
 		  std::cout << "?";
 		  std::cin >> tmp;
+#else
+		  printf("Physbase: %d \n",b2);
+		  printf("Logbase: %d \n",b1);
+		  char tmp;
+		  printf("?");
+		  scanf("%c",tmp);
+
+#endif
 #endif
 		  Setscreen(b2,b1,0);
 		  return olc::rcode::OK;
@@ -3165,8 +3232,11 @@ namespace olc
 		png_voidp a = png_get_io_ptr(pngPtr);
 		((std::istream*)a)->read((char*)data, length);
 	}
-
+#if !defined(__WITH_STDIO__)
 	olc::rcode Sprite::LoadFromFile(const std::string& sImageFile, olc::ResourcePack* pack)
+#else
+	olc::rcode Sprite::LoadFromFile(const std::string& sImageFile, char* pack)
+#endif
 	{
 		UNUSED(pack);
 		////////////////////////////////////////////////////////////////////////////
@@ -3647,11 +3717,15 @@ namespace olc
     
     void pngReadStream(png_structp pngPtr, png_bytep data, png_size_t length)
     {
-        png_voidp a = png_get_io_ptr(pngPtr);
-        ((std::istream*)a)->read((char*)data, length);
+      //        png_voidp a = png_get_io_ptr(pngPtr);
+      // ((std::istream*)a)->read((char*)data, length);
     }
     
+#if !defined(__WITH_STDIO__)
     olc::rcode Sprite::LoadFromFile(const std::string& sImageFile, olc::ResourcePack* pack)
+#else
+    olc::rcode Sprite::LoadFromFile(const std::string& sImageFile, char* pack)
+#endif
     {
 //       UNUSED(pack);
         ////////////////////////////////////////////////////////////////////////////
@@ -3788,7 +3862,7 @@ namespace olc
 }
 
 #endif // End olc namespace
-
+#endif
 // O------------------------------------------------------------------------------O
 // | END OF OLC_PGE_APPLICATION                                                   |
 // O------------------------------------------------------------------------------O
