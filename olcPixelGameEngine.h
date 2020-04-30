@@ -244,6 +244,8 @@ int main()
 #endif
 #if defined(__ATARI_ST__)
 #undef USE_EXPERIMENTAL_FS
+#include <osbind.h>
+#include <gem.h>
 //#define OLC_IGNORE_VEC2
 //#include <ghc/filesystem.hpp>*/
 //#include <filesystem>
@@ -2439,6 +2441,16 @@ namespace olc
 		  printf("Atari ST software renderer\n");
 #endif
 #endif
+                  if (!bFullScreen)
+		    {
+		      const char* s = "olcPixelGameEngine";
+		      int h = wind_create(3,0,0,320,200);
+		      wind_set(h,2,(int)((int)&s >> 8), (int)((int)&s & 0x00ff),0,0);
+		      wind_open(h,0,0,320,200);
+
+		      
+		    }
+
 		  //buffer must be at even 256
 		  b1=&buff1[0];
 		 
