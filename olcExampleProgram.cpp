@@ -30,7 +30,7 @@ public:
 int main()
 {
 	Example demo;
-	if (demo.Construct(256, 240, 4, 4))
+	if (demo.Construct(80, 40, 4, 4))
 		demo.Start();
 
 	return 0;

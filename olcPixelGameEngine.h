@@ -2404,6 +2404,7 @@ namespace olc
 	class Renderer_Atari_ST : public olc::Renderer
 	{
 	private:
+	  short* scr_mem;
 	  short buff1[8064],buff2[8064];
 	    short *b1,*b2;
             // c2p buffer
@@ -2441,15 +2442,7 @@ namespace olc
 		  printf("Atari ST software renderer\n");
 #endif
 #endif
-                  if (!bFullScreen)
-		    {
-		      const char* s = "olcPixelGameEngine";
-		      int h = wind_create(3,0,0,320,200);
-		      wind_set(h,2,(int)((int)&s >> 8), (int)((int)&s & 0x00ff),0,0);
-		      wind_open(h,0,0,320,200);
 
-		      
-		    }
 
 		  //buffer must be at even 256
 		  b1=&buff1[0];
@@ -2474,7 +2467,8 @@ namespace olc
 
 #endif
 #endif
-		  Setscreen(b2,b1,0);
+		  scr_mem = b2;
+		  //Setscreen(b2,b1,0);
 		  return olc::rcode::OK;
 		}
 
@@ -2487,11 +2481,11 @@ namespace olc
 		void DisplayFrame() override
 		{
 		  // Swap Buffers
-		  short *tmp;
+		  /*		  short *tmp;
 		  tmp=b1;
 		  b1=b2;
 		  b2=tmp;
-		  (void) Setscreen(b1,b2,0);
+		  (void) Setscreen(b1,b2,0);*/
 		}
 
 		void PrepareDrawing() override
@@ -3661,7 +3655,7 @@ namespace olc
         pColData = nullptr;
         return olc::FAIL;
     }
-}
+
 #endif
 // O------------------------------------------------------------------------------O
 // | END PLATFORM: Apple                                                          |
@@ -3676,7 +3670,7 @@ namespace olc
     class Platform_Atari_ST : public olc::Platform
     {
     private:
-
+      int h;
         
     public:
         virtual olc::rcode ApplicationStartUp() override
@@ -3707,13 +3701,28 @@ namespace olc
         
         virtual olc::rcode CreateWindowPane(const olc::vi2d& vWindowPos, olc::vi2d& vWindowSize, bool bFullScreen) override
         {
+	  if (!bFullScreen)
+	    {
+	      int h = wind_create(3,vWindowPos.x,vWindowPos.y,vWindowSize.x,vWindowSize.y);
+              const char *s = "Example";
+	      (void) wind_set(h,2,(int)s >> 16,((int)s & 0xFFFF),0,0);
+	      (void) wind_open(h,vWindowPos.x,vWindowPos.y,vWindowSize.x,vWindowSize.y);
+	      this->h = h;
+	      // clear window
+	      short* scr_mem = (short*) Physbase();
+	      short* win_start =scr_mem+(vWindowPos.y+11)*160+(vWindowPos.x/16)*4;
+              for (int i=0; i< (vWindowSize.x/16);i++ )
+		{
+		  *(win_start++) = 0;
+		}
+	    }
             // Create Keyboard Mapping
              return olc::OK;
         }
         
         virtual olc::rcode SetWindowTitle(const std::string& s) override
         {
- 
+	  (void) wind_set(h,2, (int)((int)&s >> 16), ((int)&s & 0xFFFF),0,0);
             return olc::OK;
         }
         
